@@ -3,7 +3,7 @@ import random
 import aiohttp
 import time
 from .. import loader, utils
-from telethon import errors, Button
+from telethon import errors, Button, events
 
 
 @loader.tds
@@ -21,7 +21,8 @@ class AutoSpamOnlineMod(loader.Module):
         "q_no_reply": "⚠️ <b>Используй эту команду ответом на сообщение!</b>",
         "q_added": "✅ <b>Байт включён на {}</b>",
         "qq_done": "🗑 <b>Все байты остановлены</b>",
-        "qwe_header": "📜 <b>Активные байтинги:</b>\n"
+        "qwe_header": "📜 <b>Активные байтинги:</b>\n",
+        "empty_list": "❌ <b>Нет активных байтов</b>"
     }
 
     def __init__(self):
@@ -31,17 +32,16 @@ class AutoSpamOnlineMod(loader.Module):
         self.url = "https://raw.githubusercontent.com/saltviper3333/gdfsfdsfdsf/main/messages.txt"
 
     async def get_messages(self):
-        """Скачивание TXT и превращение в список строк"""
+        """Загружаем TXT-шаблон"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.url) as response:
                     if response.status == 200:
                         data = await response.text()
                         return [line.strip() for line in data.splitlines() if line.strip()]
-                    else:
-                        return None
         except Exception as e:
             return str(e)
+        return None
 
     @loader.command()
     async def sex(self, message):
@@ -92,60 +92,55 @@ class AutoSpamOnlineMod(loader.Module):
 
     @loader.command()
     async def qwe(self, message):
-        """📜 Показать список всех активных байтингов с кнопками отключения"""
+        """📜 Показать список всех активных байтингов с кнопками удаления"""
+        await self._send_qwe(message)
+
+    async def _send_qwe(self, message_or_event, edited=False):
+        """Общий метод формирования меню"""
         if not self.q_targets:
-            return await utils.answer(message, "❌ <b>Нет активных байтов</b>")
+            text = self.strings["empty_list"]
+            if edited:
+                await message_or_event.edit(text, buttons=None)
+            else:
+                await utils.answer(message_or_event, text)
+            return
+
         out = self.strings["qwe_header"]
         buttons = []
         now = time.time()
+
         for chat_id, users in self.q_targets.items():
             try:
-                entity = await message.client.get_entity(chat_id)
-                if getattr(entity, "title", None):
-                    chat_title = f"💬 {entity.title} (группа)"
-                else:
-                    chat_title = "📩 ЛС"
+                entity = await message_or_event.client.get_entity(chat_id)
+                chat_title = f"💬 {entity.title} (группа)" if getattr(entity, "title", None) else "📩 ЛС"
             except:
                 chat_title = str(chat_id)
             out += f"\n<b>{chat_title}</b>:\n"
+
             for uid, start_time in users.items():
                 try:
-                    participant = await message.client.get_entity(uid)
-                    uname = f"@{participant.username}" if getattr(participant, "username", None) else "—"
-                    name_parts = []
-                    if getattr(participant, "first_name", None):
-                        name_parts.append(participant.first_name)
-                    if getattr(participant, "last_name", None):
-                        name_parts.append(participant.last_name)
-                    name = " ".join(name_parts) if name_parts else str(uid)
+                    user_ent = await message_or_event.client.get_entity(uid)
+                    uname = f"@{user_ent.username}" if getattr(user_ent, "username", None) else "—"
+                    name = " ".join(filter(None, [getattr(user_ent, "first_name", None),
+                                                  getattr(user_ent, "last_name", None)])) or str(uid)
                 except:
                     uname, name = "—", str(uid)
+
                 elapsed = int(now - start_time)
                 h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
                 out += f"  ├ 🆔 <code>{uid}</code> | {uname} | {name}\n"
                 out += f"  └ ⏳ {h:02}:{m:02}:{s:02}\n"
                 buttons.append([Button.inline(f"❌ {name}", data=f"remove_q:{chat_id}:{uid}")])
-        await message.client.send_message(
-            message.chat_id, out, buttons=buttons, reply_to=message.id
-        )
 
-    async def watcher(self, message):
-        if not getattr(message, "sender_id", None):
-            return
-        chat_id, user_id = message.chat_id, message.sender_id
-        if chat_id in self.q_targets and user_id in self.q_targets[chat_id]:
-            phrases = await self.get_messages()
-            if not phrases or isinstance(phrases, str):
-                return
-            try:
-                await message.reply(random.choice(phrases))
-            except errors.FloodWaitError as e:
-                await asyncio.sleep(e.seconds)
-                await message.reply(random.choice(phrases))
+        if edited:
+            await message_or_event.edit(out, buttons=buttons)
+        else:
+            await message_or_event.reply(out, buttons=buttons)
 
-    async def aiogram_inline_handler(self, call):
-        """Обработка инлайн-кнопок из .qwe"""
-        data = call.data.decode("utf-8")
+    @loader.handler()
+    async def inline_button_handler(self, event: events.CallbackQuery):
+        """Обработка нажатий на кнопки удаления в .qwe"""
+        data = event.data.decode("utf-8")
         if data.startswith("remove_q:"):
             _, chat_id, uid = data.split(":")
             chat_id, uid = int(chat_id), int(uid)
@@ -153,5 +148,18 @@ class AutoSpamOnlineMod(loader.Module):
                 del self.q_targets[chat_id][uid]
                 if not self.q_targets[chat_id]:
                     del self.q_targets[chat_id]
-                await call.answer("✅ Байtинг снят", show_alert=False)
-                await call.edit("♻️ Список обновите командой .qwe")
+            await event.answer("✅ Байtинг снят", alert=False)
+            await self._send_qwe(event, edited=True)
+
+    async def watcher(self, message):
+        if not getattr(message, "sender_id", None):
+            return
+        chat_id, user_id = message.chat_id, message.sender_id
+        if chat_id in self.q_targets and user_id in self.q_targets[chat_id]:
+            phrases = await self.get_messages()
+            if phrases and not isinstance(phrases, str):
+                try:
+                    await message.reply(random.choice(phrases))
+                except errors.FloodWaitError as e:
+                    await asyncio.sleep(e.seconds)
+                    await message.reply(random.choice(phrases))
