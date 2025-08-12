@@ -3,7 +3,7 @@ import random
 import aiohttp
 import time
 from .. import loader, utils
-from telethon import errors
+from telethon import errors, Button
 
 
 @loader.tds
@@ -31,7 +31,7 @@ class AutoSpamOnlineMod(loader.Module):
         self.url = "https://raw.githubusercontent.com/saltviper3333/gdfsfdsfdsf/main/messages.txt"
 
     async def get_messages(self):
-        """Загружаем TXT-шаблон"""
+        """Скачивание TXT и превращение в список строк"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.url) as response:
@@ -80,7 +80,7 @@ class AutoSpamOnlineMod(loader.Module):
         target_id = reply_msg.sender_id
         chat_id = message.chat_id
         self.q_targets.setdefault(chat_id, {})[target_id] = time.time()
-        await message.delete()  # удаляем команду мгновенно
+        await message.delete()
         user_name = utils.get_display_name(reply_msg.sender)
         await utils.answer(reply_msg, self.strings["q_added"].format(user_name))
 
@@ -92,10 +92,11 @@ class AutoSpamOnlineMod(loader.Module):
 
     @loader.command()
     async def qwe(self, message):
-        """📜 Показать список всех активных байтингов"""
+        """📜 Показать список всех активных байтингов с кнопками отключения"""
         if not self.q_targets:
             return await utils.answer(message, "❌ <b>Нет активных байтов</b>")
         out = self.strings["qwe_header"]
+        buttons = []
         now = time.time()
         for chat_id, users in self.q_targets.items():
             try:
@@ -118,21 +119,20 @@ class AutoSpamOnlineMod(loader.Module):
                         name_parts.append(participant.last_name)
                     name = " ".join(name_parts) if name_parts else str(uid)
                 except:
-                    uname = "—"
-                    name = str(uid)
+                    uname, name = "—", str(uid)
                 elapsed = int(now - start_time)
-                h = elapsed // 3600
-                m = (elapsed % 3600) // 60
-                s = elapsed % 60
+                h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
                 out += f"  ├ 🆔 <code>{uid}</code> | {uname} | {name}\n"
                 out += f"  └ ⏳ {h:02}:{m:02}:{s:02}\n"
-        await utils.answer(message, out)
+                buttons.append([Button.inline(f"❌ {name}", data=f"remove_q:{chat_id}:{uid}")])
+        await message.client.send_message(
+            message.chat_id, out, buttons=buttons, reply_to=message.id
+        )
 
     async def watcher(self, message):
         if not getattr(message, "sender_id", None):
             return
-        chat_id = message.chat_id
-        user_id = message.sender_id
+        chat_id, user_id = message.chat_id, message.sender_id
         if chat_id in self.q_targets and user_id in self.q_targets[chat_id]:
             phrases = await self.get_messages()
             if not phrases or isinstance(phrases, str):
@@ -142,3 +142,16 @@ class AutoSpamOnlineMod(loader.Module):
             except errors.FloodWaitError as e:
                 await asyncio.sleep(e.seconds)
                 await message.reply(random.choice(phrases))
+
+    async def aiogram_inline_handler(self, call):
+        """Обработка инлайн-кнопок из .qwe"""
+        data = call.data.decode("utf-8")
+        if data.startswith("remove_q:"):
+            _, chat_id, uid = data.split(":")
+            chat_id, uid = int(chat_id), int(uid)
+            if chat_id in self.q_targets and uid in self.q_targets[chat_id]:
+                del self.q_targets[chat_id][uid]
+                if not self.q_targets[chat_id]:
+                    del self.q_targets[chat_id]
+                await call.answer("✅ Байtинг снят", show_alert=False)
+                await call.edit("♻️ Список обновите командой .qwe")
