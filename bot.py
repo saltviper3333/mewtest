@@ -43,9 +43,9 @@ class AutoSpamOnlineMod(loader.Module):
         except Exception as e:
             return str(e)
 
-    # === Запуск спама ===
     @loader.command()
     async def sex(self, message):
+        """🚀 Запустить еблю (онлайн-спам)"""
         if self.spam_active:
             return await utils.answer(message, self.strings["already_running"])
         phrases = await self.get_messages()
@@ -64,34 +64,35 @@ class AutoSpamOnlineMod(loader.Module):
 
     @loader.command()
     async def s(self, message):
+        """⛔ Остановить еблю"""
         if self.spam_active:
             self.spam_active = False
             await utils.answer(message, self.strings["spam_stopped"])
         else:
             await utils.answer(message, self.strings["not_running"])
 
-    # === Ставим "байт" ===
     @loader.command()
     async def q(self, message):
+        """🎯 В ответ на сообщение — включить автобайт на пользователя"""
         if not message.is_reply:
             return await utils.answer(message, self.strings["q_no_reply"])
         reply_msg = await message.get_reply_message()
         target_id = reply_msg.sender_id
         chat_id = message.chat_id
         self.q_targets.setdefault(chat_id, {})[target_id] = time.time()
-        await message.delete()  # мгновенно удаляем команду
+        await message.delete()  # удаляем команду мгновенно
         user_name = utils.get_display_name(reply_msg.sender)
         await utils.answer(reply_msg, self.strings["q_added"].format(user_name))
 
-    # === Сбрасываем все цели ===
     @loader.command()
     async def qq(self, message):
+        """🗑 Остановить все активные байты"""
         self.q_targets.clear()
         await utils.answer(message, self.strings["qq_done"])
 
-    # === Список активных байтов ===
     @loader.command()
     async def qwe(self, message):
+        """📜 Показать список всех активных байтингов"""
         if not self.q_targets:
             return await utils.answer(message, "❌ <b>Нет активных байтов</b>")
         out = self.strings["qwe_header"]
@@ -108,7 +109,6 @@ class AutoSpamOnlineMod(loader.Module):
             out += f"\n<b>{chat_title}</b>:\n"
             for uid, start_time in users.items():
                 try:
-                    # Получаем участника, чтобы точно достать имя/юзернейм
                     participant = await message.client.get_entity(uid)
                     uname = f"@{participant.username}" if getattr(participant, "username", None) else "—"
                     name_parts = []
@@ -128,7 +128,6 @@ class AutoSpamOnlineMod(loader.Module):
                 out += f"  └ ⏳ {h:02}:{m:02}:{s:02}\n"
         await utils.answer(message, out)
 
-    # === Автоответчик по шаблону ===
     async def watcher(self, message):
         if not getattr(message, "sender_id", None):
             return
